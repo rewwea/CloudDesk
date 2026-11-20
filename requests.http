@@ -1,0 +1,68 @@
+
+@url = http://localhost:8080
+
+### 1. Проверка API и базы
+GET {{url}}/health
+
+### 2. Получение всех заявок
+GET {{url}}/api/tickets
+
+### 3. Получение заявки по ID
+GET {{url}}/api/tickets/1
+
+### 4. Фильтрация по статусу
+GET {{url}}/api/tickets?status=new
+
+### 5. Фильтрация по приоритету
+GET {{url}}/api/tickets?priority=1
+
+### 6. Поиск по названию
+GET {{url}}/api/tickets?q=Ошибка
+
+### 7. Сортировка по дате
+GET {{url}}/api/tickets?sort=asc
+
+### 8. Пагинация
+GET {{url}}/api/tickets?page=1&pageSize=2
+
+### 9. Статистика
+GET {{url}}/api/stats
+
+### 10. Создание заявки
+POST {{url}}/api/tickets
+Content-Type: application/json
+
+{
+  "title": "Проблема с клавиатурой",
+  "description": "Не работают некоторые клавиши",
+  "priority": 2,
+  "status": "new"
+}
+
+### 11. Изменение заявки
+PUT {{url}}/api/tickets/7
+Content-Type: application/json
+
+{
+  "title": "Ошибка сети",
+  "description": "Проблема устранена",
+  "priority": 1,
+  "status": "done"
+}
+
+### 12. Удаление заявки
+DELETE {{url}}/api/tickets/99999
+
+### 13. Проверка ошибки 404
+GET {{url}}/api/tickets/99999
+
+### 14. Проверка ошибки 400
+POST {{url}}/api/tickets
+Content-Type: application/json
+
+{
+  "title": "Тест",
+  "description": "Неправильный приоритет",
+  "priority": 10,
+  "status": "new"
+}

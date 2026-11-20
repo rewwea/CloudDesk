@@ -1,0 +1,21 @@
+
+# .NET
+**/bin/
+**/obj/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# System
+.DS_Store
+
+# Logs
+*.log
