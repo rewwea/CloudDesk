@@ -1,16 +1,16 @@
 services:
   api:
-    build:
-      context: ./CloudDesk
-      dockerfile: Dockerfile
+    build: ./CloudDesk
     image: clouddesk:1.0
-    ports:
-      - "8080:8080"
     environment:
-      ConnectionStrings__Default: "Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Default: 'Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
+      REDIS_HOST: redis:6379
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+    restart: on-failure
 
   db:
     image: postgres:17
@@ -22,11 +22,31 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      test:
+        ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 5s
       retries: 10
-    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+
+  worker:
+    build: ./CloudDeskWorker
+    environment:
+      REDIS_HOST: redis:6379
+    depends_on:
+      - redis
+    restart: on-failure
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
 
 volumes:
   pgdata:

@@ -1,3 +1,5 @@
+using StackExchange.Redis;
+using System.Text.Json;
 
 using Npgsql;
 
@@ -11,6 +13,52 @@ app.Use(async (context, next) =>
 });
 
 var cs = builder.Configuration.GetConnectionString("Default")!;
+
+var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "redis:6379";
+ConnectionMultiplexer? redis = null;
+
+async Task<IDatabase?> RedisDb()
+{
+    try
+    {
+        if (redis == null || !redis.IsConnected)
+            redis = await ConnectionMultiplexer.ConnectAsync(
+                $"{redisHost},abortConnect=false,connectTimeout=1000,syncTimeout=1000");
+
+        return redis.GetDatabase();
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+async Task RedisAction(string? operation = null, int id = 0)
+{
+    try
+    {
+        var db = await RedisDb();
+        if (db == null) return;
+
+        await db.KeyDeleteAsync("stats");
+
+        if (operation != null)
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                id,
+                operation,
+                time = DateTime.UtcNow
+            });
+            await db.ListRightPushAsync("ticket_events_queue", json);
+        }
+    }
+    catch
+    {
+        // PostgreSQL продолжает работать без Redis
+    }
+}
+
 
 NpgsqlConnection Db() => new(cs);
 
@@ -125,6 +173,7 @@ app.MapPost("/api/tickets", async (Ticket t) =>
         """, db);
     AddTicketParams(cmd, t);
     int id = (int)(await cmd.ExecuteScalarAsync())!;
+    await RedisAction("created", id);
     return Results.Created($"/api/tickets/{id}", new { id });
 });
 
@@ -139,8 +188,11 @@ app.MapPut("/api/tickets/{id:int}", async (int id, Ticket t) =>
         """, db);
     cmd.Parameters.AddWithValue("id", id);
     AddTicketParams(cmd, t);
-    return await cmd.ExecuteNonQueryAsync() == 0
-        ? Results.NotFound() : Results.Ok(new { message = "Updated" });
+    int rows = await cmd.ExecuteNonQueryAsync();
+    if (rows == 0) return Results.NotFound();
+
+    await RedisAction("updated", id);
+    return Results.Ok(new { message = "Updated" });
 });
 
 app.MapDelete("/api/tickets/{id:int}", async (int id) =>
@@ -149,12 +201,33 @@ app.MapDelete("/api/tickets/{id:int}", async (int id) =>
     await db.OpenAsync();
     await using var cmd = new NpgsqlCommand("DELETE FROM tickets WHERE id=@id", db);
     cmd.Parameters.AddWithValue("id", id);
-    return await cmd.ExecuteNonQueryAsync() == 0
-        ? Results.NotFound() : Results.NoContent();
+    int rows = await cmd.ExecuteNonQueryAsync();
+    if (rows == 0) return Results.NotFound();
+    
+    await RedisAction("deleted", id);
+    return Results.NoContent();
 });
 
-app.MapGet("/api/stats", async () =>
+
+app.MapGet("/api/stats", async (HttpContext context) =>
 {
+    IDatabase? cache = null;
+
+    try
+    {
+        cache = await RedisDb();
+        if (cache != null)
+        {
+            var saved = await cache.StringGetAsync("stats");
+            if (!saved.IsNull)
+            {
+                context.Response.Headers["X-Cache"] = "HIT";
+                return Results.Content(saved.ToString(), "application/json");
+            }
+        }
+    }
+    catch { cache = null; }
+
     await using var db = Db();
     await db.OpenAsync();
     await using var cmd = new NpgsqlCommand("""
@@ -164,13 +237,63 @@ app.MapGet("/api/stats", async () =>
         COUNT(*) FILTER (WHERE status='done')
         FROM tickets
         """, db);
+
     await using var r = await cmd.ExecuteReaderAsync();
     await r.ReadAsync();
-    return Results.Ok(new {
+
+    var result = new
+    {
         total = r.GetInt64(0),
         newTickets = r.GetInt64(1),
         inProgress = r.GetInt64(2),
         done = r.GetInt64(3)
+    };
+
+    var json = JsonSerializer.Serialize(result);
+    context.Response.Headers["X-Cache"] = "MISS";
+
+    try
+    {
+        if (cache != null)
+            await cache.StringSetAsync("stats", json, TimeSpan.FromSeconds(30));
+    }
+    catch { }
+
+    return Results.Ok(result);
+});
+
+
+
+app.MapGet("/api/instance", () => new
+{
+    instance = Environment.MachineName
+});
+
+app.MapGet("/health/details", async () =>
+{
+    bool postgres = false;
+    bool redisOk = false;
+
+    try
+    {
+        await using var db = Db();
+        await db.OpenAsync();
+        postgres = true;
+    }
+    catch { }
+
+    try
+    {
+        var r = await RedisDb();
+        redisOk = r != null && await r.PingAsync() >= TimeSpan.Zero;
+    }
+    catch { }
+
+    return Results.Ok(new
+    {
+        api = "ok",
+        postgresql = postgres ? "ok" : "error",
+        redis = redisOk ? "ok" : "error"
     });
 });
 

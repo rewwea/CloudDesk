@@ -1,4 +1,3 @@
-
 # CloudDesk
 
 Учебный сервис заявок технической поддержки на ASP.NET Core Minimal API, PostgreSQL и Docker Compose.
@@ -30,15 +29,15 @@ API работает на порту 8080.
 
 ## 2. HTTP-маршруты
 
-| Метод | Маршрут | Назначение |
-|---|---|---|
-| GET | /health | Проверка API и БД |
-| GET | /api/tickets | Список заявок |
-| GET | /api/tickets/{id} | Получение заявки |
-| POST | /api/tickets | Создание заявки |
-| PUT | /api/tickets/{id} | Изменение заявки |
-| DELETE | /api/tickets/{id} | Удаление заявки |
-| GET | /api/stats | Статистика |
+| Метод  | Маршрут           | Назначение        |
+| ------ | ----------------- | ----------------- |
+| GET    | /health           | Проверка API и БД |
+| GET    | /api/tickets      | Список заявок     |
+| GET    | /api/tickets/{id} | Получение заявки  |
+| POST   | /api/tickets      | Создание заявки   |
+| PUT    | /api/tickets/{id} | Изменение заявки  |
+| DELETE | /api/tickets/{id} | Удаление заявки   |
+| GET    | /api/stats        | Статистика        |
 
 Параметры списка:
 
@@ -93,3 +92,39 @@ docker compose start db
 При недоступной базе `/health` возвращает HTTP 503.
 
 История изменения статусов хранится в таблице `ticket_events`.
+
+## Дополнительные возможности
+
+- Redis: кэширование статистики на 30 секунд с заголовком X-Cache.
+- CloudDeskWorker: обработка событий создания, изменения и удаления заявок через очередь Redis.
+- PostgreSQL: резервное копирование скриптом backup.sh и восстановление в отдельную базу.
+- Диагностика: /health/details, Docker logs и Docker stats.
+- Nginx: обратный прокси и балансировка двух экземпляров API.
+
+## Запуск
+
+Создать .env на основе .env.example и указать пароль PostgreSQL.
+
+```bash
+docker compose up -d --build --scale api=2
+```
+
+Проверка:
+
+```bash
+curl http://localhost:8080/health/details
+curl -i http://localhost:8080/api/stats
+curl http://localhost:8080/api/instance
+```
+
+Резервное копирование:
+
+```bash
+./backup.sh
+```
+
+Журналы Worker:
+
+```bash
+docker compose logs worker
+```
